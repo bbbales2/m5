@@ -55,6 +55,7 @@ mapper = multilevel_tools.Mapper(
     prepare_domains=Parameters(
         # These first two are scalar parameters
         #   There's probably a way to do better here
+        #   Actually maybe pass optional *args and **kwargs through the mapper?
         lambda x: 0,
         lambda x: 0,
         lambda x: (x.item_id, x.year, x.month),

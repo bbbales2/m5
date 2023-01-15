@@ -43,6 +43,9 @@ Parameters = namedtuple(
     )
 )
 
+# It might be better to do these mappers less object-oriented
+#  By that I mean make the interface like:
+#    mapper, domains = mulitlevel_tools.build_mapper(xs, prepare_constants=...)
 mapper = multilevel_tools.Mapper(
     xs,
     prepare_constants=(
@@ -50,13 +53,15 @@ mapper = multilevel_tools.Mapper(
         lambda x: x.sell_price,
     ),
     prepare_domains=Parameters(
+        # These first two are scalar parameters
+        #   There's probably a way to do better here
         lambda x: 0,
         lambda x: 0,
         lambda x: (x.item_id, x.year, x.month),
         lambda x: x.wday
     )
 )
-# %%
+
 domains : Parameters = mapper.domains
 
 #%%
@@ -66,6 +71,10 @@ def model1():
         mu = p.beta * sell_price + p.item_year_month + p.wday
         return negative_binomial_log(sales, mu, p.phi)
 
+    # The parameters are awkward here for a few reasons and could be improved
+    #  1. Having to declare the parameter names in strings and then as variables
+    #  2. Not having easy constraints
+    #  3. The transformed parameters aren't exposed to the outside automatically
     beta = haiku.get_parameter("beta", shape = [len(domains.beta)], init=jax.numpy.zeros)
     log_phi = haiku.get_parameter("log_phi", shape = [len(domains.phi)], init=jax.numpy.zeros)
     item_year_month_z = haiku.get_parameter("item_year_month_z", shape = [len(domains.item_year_month)], init=jax.numpy.zeros)

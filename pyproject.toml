@@ -17,6 +17,7 @@ pendulum = "^2.1.2"
 sortedcontainers = "^2.4.0"
 typing-extensions = "^4.4.0"
 pytest = "^7.2.1"
+blackjax = {git = "https://github.com/blackjax-devs/blackjax"}
 
 
 [tool.poetry.group.dev.dependencies]

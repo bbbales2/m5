@@ -41,7 +41,7 @@ class Mapper(Generic[X, Y]):
             self,
             map_function: Callable[[Any, Any], Y],
             parameters: Optional[Any] = None
-    ):
+    ) -> jax.numpy.ndarray:
         flat_parameters, parameters_treedef = jax.tree_util.tree_flatten(parameters)
         flat_domain_indices, domain_indices_treedef = jax.tree_util.tree_flatten(self._domain_indices)
 
@@ -122,17 +122,19 @@ class Scanner(Generic[X, Y, G, K]):
                 (parameter[index] for parameter, index in zip(flat_parameters, flat_domain_indices))
             )
 
-            current = jax.numpy.where(
+            previous_or_initial_condition = jax.numpy.where(
                 initial_value_index > 0,
-                initial_values[initial_value_index],
-                update(previous, constants, local_parameters)
+                initial_values[initial_value_index - 1],
+                previous
             )
+
+            current = update(previous_or_initial_condition, constants, local_parameters)
 
             return current, current
 
         _, output = jax.lax.scan(
                 f=scanner,
-                init=0.0,
+                init=jax.numpy.array(0, dtype=initial_values.dtype),
                 xs=(
                     self._initial_value_indices,
                     self._mapper._constants,

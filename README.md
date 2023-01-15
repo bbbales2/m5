@@ -1,0 +1,1 @@
+Model for the M5 time series competition dataset. The data is not included here. It can be acquired from the Google drive at the bottom of this page: https://github.com/Mcompetitions/M5-methods

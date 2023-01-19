@@ -3,6 +3,7 @@ from typing import List, Callable, TypeVar, Any, Generic, Optional
 from collections import Counter
 
 import jax
+from jaxtyping import PyTree
 
 X = TypeVar("X")
 Y = TypeVar("Y")
@@ -11,10 +12,10 @@ K = TypeVar("K")
 
 
 class Mapper(Generic[X, Y]):
-    domains: Any
+    domains: PyTree[SortedSet]
 
-    _constants: Any
-    _domain_indices: Any
+    _constants: PyTree[jax.numpy.ndarray]
+    _domain_indices: PyTree[jax.numpy.ndarray[int]]
 
     def __init__(
             self,

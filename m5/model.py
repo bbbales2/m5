@@ -2,8 +2,8 @@
 
 from collections import namedtuple
 from importlib import reload
-import blackjax
-import haiku
+from bunny.sampler import warmup_and_sample
+import equinox
 import jax
 import multilevel_tools
 import numpy
@@ -36,8 +36,6 @@ reload(multilevel_tools)
 Parameters = namedtuple(
     "Parameters",
     (
-        "beta",
-        "phi",
         "item_year_month",
         "wday"
     )
@@ -53,73 +51,86 @@ mapper = multilevel_tools.Mapper(
         lambda x: x.sell_price,
     ),
     prepare_domains=Parameters(
-        # These first two are scalar parameters
-        #   There's probably a way to do better here
-        #   Actually maybe pass optional *args and **kwargs through the mapper?
-        lambda x: 0,
-        lambda x: 0,
         lambda x: (x.item_id, x.year, x.month),
         lambda x: x.wday
     )
 )
 
-domains : Parameters = mapper.domains
+domains = mapper.domains
 
 #%%
-def model1():
-    def log_likelihood_function(constants, p : Parameters):
-        sales, sell_price = constants
-        mu = p.beta * sell_price + p.item_year_month + p.wday
-        return negative_binomial_log(sales, mu, p.phi)
 
-    # The parameters are awkward here for a few reasons and could be improved
-    #  1. Having to declare the parameter names in strings and then as variables
-    #  2. Not having easy constraints
-    #  3. The transformed parameters aren't exposed to the outside automatically
-    beta = haiku.get_parameter("beta", shape = [len(domains.beta)], init=jax.numpy.zeros)
-    log_phi = haiku.get_parameter("log_phi", shape = [len(domains.phi)], init=jax.numpy.zeros)
-    item_year_month_z = haiku.get_parameter("item_year_month_z", shape = [len(domains.item_year_month)], init=jax.numpy.zeros)
-    wday = haiku.get_parameter("wday", shape = [len(domains.wday)], init=jax.numpy.zeros)
-    log_item_year_month_scale = haiku.get_parameter("log_item_year_month_scale", shape=[], init=jax.numpy.zeros)
+class Model1(equinox.Module):
+    beta: jax.numpy.ndarray
+    log_phi: jax.numpy.ndarray
+    item_year_month_z: jax.numpy.ndarray
+    wday: jax.numpy.ndarray
+    log_item_year_month_scale: jax.numpy.ndarray
 
-    item_year_month_scale = jax.numpy.exp(log_item_year_month_scale)
-    item_year_month = item_year_month_z * item_year_month_scale
-    phi = jax.numpy.exp(log_phi)
+    def __init__(self, key):
+        keys = jax.random.split(key, 5)
+        self.beta = jax.random.normal(keys[0], ())
+        self.log_phi = jax.random.normal(keys[1], ())
+        self.item_year_month_z = jax.random.normal(keys[2], (len(domains.item_year_month),))
+        self.wday = jax.random.normal(keys[3], (len(domains.wday),))
+        self.log_item_year_month_scale = jax.random.normal(keys[4], ())
 
-    log_sum_priors = (
-        jax.numpy.sum(jax.scipy.stats.norm.logpdf(beta, 0.0, 1.0))
-        + jax.numpy.sum(jax.scipy.stats.norm.logpdf(log_phi, 0.0, 1.0))
-        + jax.numpy.sum(jax.scipy.stats.norm.logpdf(item_year_month_z, 0.0, 1.0))
-        + jax.numpy.sum(jax.scipy.stats.norm.logpdf(wday, 0.0, 1.0))
-        + jax.numpy.sum(jax.scipy.stats.norm.logpdf(log_item_year_month_scale, 0.0, 1.0))
-    )
+    def __call__(self):
+        item_year_month_scale = jax.numpy.exp(self.log_item_year_month_scale)
+        item_year_month = self.item_year_month_z * item_year_month_scale
+        phi = jax.numpy.exp(self.log_phi)
 
-    log_likelihood = mapper(
-        map_function = log_likelihood_function,
-        parameters = Parameters(
-            beta=beta,
-            phi=phi,
-            item_year_month=item_year_month,
-            wday=wday
+        log_sum_priors = (
+            jax.numpy.sum(jax.scipy.stats.norm.logpdf(self.beta, 0.0, 1.0))
+            + jax.numpy.sum(jax.scipy.stats.norm.logpdf(self.log_phi, 0.0, 1.0))
+            + jax.numpy.sum(jax.scipy.stats.norm.logpdf(self.item_year_month_z, 0.0, 1.0))
+            + jax.numpy.sum(jax.scipy.stats.norm.logpdf(self.wday, 0.0, 1.0))
+            + jax.numpy.sum(jax.scipy.stats.norm.logpdf(self.log_item_year_month_scale, 0.0, 1.0))
         )
-    )
 
-    return log_sum_priors + jax.numpy.sum(log_likelihood)
+        def log_likelihood_function(constants, parameters : Parameters):
+            sales, sell_price = constants
+            item_year_month, wday = parameters
+            mu = self.beta * sell_price + item_year_month + wday
+            return negative_binomial_log(sales, mu, phi)
 
-transformed = haiku.without_apply_rng(haiku.transform(model1))
+        log_likelihood = mapper(
+            map_function = log_likelihood_function,
+            parameters = Parameters(
+                item_year_month=item_year_month,
+                wday=self.wday
+            )
+        )
+
+        return log_sum_priors + jax.numpy.sum(log_likelihood)
+#%%
+
 rng_key = jax.random.PRNGKey(42)
-params = transformed.init(rng=rng_key)
-mu_out = transformed.apply(params)
+model = Model1(rng_key)
+
+value_and_grad = jax.jit(jax.value_and_grad(lambda x: -x()))
 
 #%%
 
-rng_key = jax.random.PRNGKey(0)
-rng_key, init_key, warmup_key = jax.random.split(rng_key, 3)
-warmup = blackjax.window_adaptation(blackjax.nuts, transformed.apply)
+flat_model, model_treedef = jax.tree_util.tree_flatten(model)
+@jax.jit
+def flat_value_and_grad(x: numpy.ndarray):
+    value, unflattened_grad = value_and_grad(jax.tree_util.tree_unflatten(model_treedef, x))
+    return value, jax.tree_util.tree_flatten(unflattened_grad)
 
 #%%
-initial_states, _, tuned_params = warmup.run(warmup_key, params, 1000)
-position = initial_states.position
+
+value_and_grad(model)
+
+#%%
+
+flat_value_and_grad(flat_model)
+
+#%%
+
+rng = numpy.random.default_rng(0)
+
+draws = warmup_and_sample(value_and_grad, rng, initial_draw)
 
 #%%
 

@@ -6,10 +6,9 @@ authors = ["bbbales2 <bbbales2@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = "^3.10,<3.12"
 jax = "^0.4.1"
 jaxlib = "^0.4.1"
-dm-haiku = "^0.0.9"
 numpy = "^1.24.1"
 plotnine = "^0.10.1"
 pandas = "^1.5.2"
@@ -17,7 +16,8 @@ pendulum = "^2.1.2"
 sortedcontainers = "^2.4.0"
 typing-extensions = "^4.4.0"
 pytest = "^7.2.1"
-blackjax = {git = "https://github.com/blackjax-devs/blackjax"}
+equinox = "^0.9.2"
+bunny = {git = "git@github.com:bbbales2/bunny.git"}
 
 
 [tool.poetry.group.dev.dependencies]

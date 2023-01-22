@@ -3,7 +3,6 @@ from typing import List, Callable, TypeVar, Any, Generic, Optional
 from collections import Counter
 
 import jax
-from jaxtyping import PyTree
 
 X = TypeVar("X")
 Y = TypeVar("Y")
@@ -11,11 +10,34 @@ G = TypeVar("G")
 K = TypeVar("K")
 
 
-class Mapper(Generic[X, Y]):
-    domains: PyTree[SortedSet]
+def pytree_to_vector(pytree):
+    flat_pytree, treedef = jax.tree_util.tree_flatten(pytree)
 
-    _constants: PyTree[jax.numpy.ndarray]
-    _domain_indices: PyTree[jax.numpy.ndarray[int]]
+    shapes = [x.shape for x in flat_pytree]
+    sizes = [x.size for x in flat_pytree]
+    starts = []
+    total = 0
+    for size in sizes:
+        starts.append(total)
+        total += size
+
+    vector = jax.numpy.concatenate([x.flatten() for x in flat_pytree])
+
+    def vector_to_pytree(x):
+        flat_pytree = [
+            x[start:(start + size)].reshape(shape)
+            for shape, size, start in zip(shapes, sizes, starts)
+        ]
+        return jax.tree_util.tree_unflatten(treedef, flat_pytree)
+
+    return vector, vector_to_pytree
+
+
+class Mapper(Generic[X, Y]):
+    domains: SortedSet
+
+    _constants: jax.numpy.ndarray
+    _domain_indices: jax.numpy.ndarray
 
     def __init__(
             self,
@@ -135,7 +157,7 @@ class Scanner(Generic[X, Y, G, K]):
 
         _, output = jax.lax.scan(
                 f=scanner,
-                init=jax.numpy.array(0, dtype=initial_values.dtype),
+                init=jax.numpy.zeros(initial_values[0].shape, dtype=initial_values.dtype),
                 xs=(
                     self._initial_value_indices,
                     self._mapper._constants,
